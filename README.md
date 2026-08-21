@@ -41,7 +41,6 @@ Set these as **secrets** on the Keboola data-app config (prefix with `#` so they
 | `#KBC_STORAGE_API_URL` | Your Keboola stack URL, no trailing slash. | E.g. `https://connection.us-east4.gcp.keboola.com`. Check your Keboola UI URL bar. |
 | `#KBC_STORAGE_TOKEN` | Storage API token. All MCP tools run with this token's permissions; scope it to what your AI agent needs. | Project Settings → API tokens → New token. |
 | `#MCP_API_KEY` | The client-auth secret you generate. Doubles as the **static bearer** and the **OAuth `client_secret`**. | `openssl rand -hex 32` |
-| `#MCP_PUBLIC_URL` | Externally reachable origin of this app, no trailing slash, no `/mcp`. | After your first deploy: copy the data-app URL Keboola shows you, e.g. `https://<slug>-<cfg>.hub.<region>.keboola.com`. |
 
 Optional:
 
@@ -50,18 +49,21 @@ Optional:
 | `KBC_WORKSPACE_SCHEMA` | unset | Snowflake/BigQuery schema for the SQL-transformation tools. Find it in your project's workspace settings. |
 | `LOG_LEVEL` | `INFO` | `DEBUG` while iterating, `INFO` in prod. |
 | `PORT` | `5000` | Don't change; the Nginx config expects 5000. |
+| `#MCP_PUBLIC_URL` | `KBC_APP_PUBLIC_URL` | Override for the origin advertised by the OAuth discovery documents. Keboola injects `KBC_APP_PUBLIC_URL` with the app's own URL, so leave this unset unless the app is reached at a different origin (custom domain, reverse proxy). No trailing slash, no `/mcp`. |
 
 ## Deploy
 
 1. **Fork this repo** to a GitHub account Keboola can clone (private or public, either works).
 2. In your Keboola project: **Apps → Create App → Python/JS Data App**.
 3. Point at your fork (repo URL + branch).
-4. Add the four required `#`-prefixed secrets above. Leave `#MCP_PUBLIC_URL` empty for the first deploy — you don't know the URL yet.
+4. Add the three required `#`-prefixed secrets above.
 5. **App-level auth: set to "No auth".** Keboola's app-level OIDC strips the `Authorization` header before it reaches the container, which breaks both auth patterns below. The MCP_API_KEY is the security boundary.
 6. **Auto-suspend window**: set to **24 hours** or longer so the first call of each day doesn't pay cold-start.
 7. **Click Deploy.** Wait for the container to come up.
-8. Copy the app's public URL from the Keboola UI, then **add `#MCP_PUBLIC_URL`** with that value and **redeploy** so the OAuth-shape discovery documents advertise the correct origin.
-9. Verify: `curl https://<your-app-url>/healthz` → `{"status":"ok",...}`.
+8. Verify: `curl https://<your-app-url>/healthz` → `{"status":"ok",...}`.
+
+No second pass is needed. The discovery documents pick up the app's own URL from
+`KBC_APP_PUBLIC_URL`, which Keboola injects into every data-app container.
 
 ## Connect a client
 
@@ -106,7 +108,12 @@ curl -sS https://<your-app-url>/.well-known/oauth-authorization-server
 curl -sS -i https://<your-app-url>/mcp | head -5   # expect 401 + WWW-Authenticate
 ```
 
-The discovery JSON should show your `MCP_PUBLIC_URL`, not `127.0.0.1:5000`. If it shows the localhost form, `#MCP_PUBLIC_URL` wasn't set — fix and redeploy.
+The discovery JSON should show this app's own URL. If it shows some *other* app's
+URL, this config was duplicated from one that sets the `#MCP_PUBLIC_URL` override —
+duplication copies secrets verbatim, and the override wins over the platform value.
+Remove `#MCP_PUBLIC_URL` from the copy and redeploy. If it shows `127.0.0.1:5000`,
+the app is running somewhere that does not inject `KBC_APP_PUBLIC_URL`; set the
+override explicitly.
 
 ## How auth works under the hood
 
